@@ -1,1 +1,15 @@
 @import "tailwindcss";
+
+/* Minimal component styles */
+button,
+input {
+    transition: all 0.15s ease;
+}
+
+input:focus {
+    outline: none;
+}
+
+button:not(:disabled):active {
+    transform: scale(0.98);
+}
