@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { BrandMark, Button, Field } from './components/ui';
+import { signup, login } from './lib/api';
 
 interface AuthProps {
-    onAuth: (username: string) => void;
+    onAuth: (username: string, token: string) => void;
 }
 
 function Auth({ onAuth }: AuthProps) {
@@ -9,147 +11,185 @@ function Auth({ onAuth }: AuthProps) {
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        setError('');
 
-        if (!username.trim()) {
-            setError('Username is required');
-            return;
-        }
+        if (!username.trim()) { setError('Username is required'); return; }
+        if (!password.trim()) { setError('Password is required'); return; }
+        if (username.length < 3) { setError('Username must be at least 3 characters'); return; }
+        if (password.length < 4) { setError('Password must be at least 4 characters'); return; }
 
-        if (!password.trim()) {
-            setError('Password is required');
-            return;
-        }
+        setIsLoading(true);
 
-        if (username.length < 3) {
-            setError('Username must be at least 3 characters');
-            return;
-        }
-
-        if (password.length < 4) {
-            setError('Password must be at least 4 characters');
-            return;
-        }
-
-        // For now, we'll use localStorage for simple auth
-        // In production, this should be a real backend API
-        if (isLogin) {
-            const storedPassword = localStorage.getItem(`user_${username}`);
-            if (!storedPassword) {
-                setError('User not found. Please sign up first.');
-                return;
-            }
-            if (storedPassword !== password) {
-                setError('Invalid password');
-                return;
-            }
-            onAuth(username);
-        } else {
-            // Signup
-            const existingUser = localStorage.getItem(`user_${username}`);
-            if (existingUser) {
-                setError('Username already exists');
-                return;
-            }
-            localStorage.setItem(`user_${username}`, password);
-            onAuth(username);
-        }
-    };
-
-    const handleKeyPress = (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter') {
-            handleSubmit(e as any);
+        try {
+            const fn = isLogin ? login : signup;
+            const { token, username: returnedUsername } = await fn(username.trim(), password);
+            // Persist token so refresh keeps you logged in
+            localStorage.setItem('chat_token', token);
+            localStorage.setItem('chat_username', returnedUsername);
+            onAuth(returnedUsername, token);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Something went wrong.');
+        } finally {
+            setIsLoading(false);
         }
     };
 
     return (
-        <div className="min-h-screen bg-black flex items-center justify-center p-6 sm:p-12">
-            <div className="w-full max-w-md bg-[#09090b] rounded-xl border border-zinc-800 p-10 sm:p-16 flex flex-col gap-10 shadow-2xl shadow-zinc-900/20">
-                {/* Header */}
-                <div className="text-center space-y-3">
-                    <div className="flex items-center justify-center gap-3">
-                        <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                        </svg>
-                        <h1 className="text-2xl font-bold text-white tracking-tight">Real Time Chat</h1>
-                    </div>
-                    <p className="text-zinc-400 text-sm">
-                        {isLogin ? 'Welcome back! Sign in to continue' : 'Create an account to get started'}
-                    </p>
-                </div>
+        <main
+            style={{
+                minHeight: '100vh',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'var(--bg-base)',
+                padding: '24px',
+                position: 'relative',
+                overflow: 'hidden',
+            }}
+        >
+            {/* Background glow blobs */}
+            <div style={{
+                position: 'absolute', top: '15%', left: '50%', transform: 'translateX(-50%)',
+                width: 500, height: 300, borderRadius: '50%',
+                background: 'radial-gradient(ellipse, rgba(124,58,237,0.12) 0%, transparent 70%)',
+                pointerEvents: 'none',
+            }} />
+            <div style={{
+                position: 'absolute', bottom: '10%', right: '10%',
+                width: 300, height: 300, borderRadius: '50%',
+                background: 'radial-gradient(ellipse, rgba(14,165,233,0.07) 0%, transparent 70%)',
+                pointerEvents: 'none',
+            }} />
 
-                {/* Auth Form */}
-                <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-                    <div className="space-y-2">
-                        <label htmlFor="username" className="block text-zinc-300 text-xs font-medium uppercase tracking-wider ml-1">
-                            Username
-                        </label>
-                        <input
-                            id="username"
+            <div
+                className="animate-pop-in"
+                style={{
+                    width: '100%',
+                    maxWidth: 420,
+                    background: 'var(--bg-surface)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-xl)',
+                    boxShadow: 'var(--shadow-lg)',
+                    overflow: 'hidden',
+                    position: 'relative',
+                }}
+            >
+                {/* Top accent line */}
+                <div style={{
+                    height: 3,
+                    background: 'linear-gradient(90deg, #7c3aed, #6d28d9, #5b21b6)',
+                    boxShadow: '0 2px 16px rgba(124,58,237,0.6)',
+                }} />
+
+                <div style={{ padding: '40px 36px' }}>
+                    {/* Header */}
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, marginBottom: 36, textAlign: 'center' }}>
+                        <BrandMark size={52} />
+                        <div>
+                            <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', lineHeight: 1.2 }}>
+                                {isLogin ? 'Welcome back' : 'Create account'}
+                            </h1>
+                            <p style={{ marginTop: 8, fontSize: '14px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                                {isLogin ? 'Sign in to join the conversation.' : 'Join the real-time chat network.'}
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Form */}
+                    <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                        <Field
+                            id="auth-username"
+                            label="Username"
                             type="text"
                             value={username}
-                            onChange={(e) => {
-                                setUsername(e.target.value);
-                                setError('');
-                            }}
-                            onKeyPress={handleKeyPress}
+                            onChange={e => { setUsername(e.target.value); setError(''); }}
                             placeholder="Enter your username"
-                            className="w-full h-12 bg-black border border-zinc-800 rounded-2xl px-5 text-white placeholder-zinc-600 focus:outline-none focus:border-white/20 focus:ring-1 focus:ring-white/20 transition-all text-sm"
                             autoFocus
+                            autoComplete="username"
                         />
-                    </div>
-
-                    <div className="space-y-2">
-                        <label htmlFor="password" className="block text-zinc-300 text-xs font-medium uppercase tracking-wider ml-1">
-                            Password
-                        </label>
-                        <input
-                            id="password"
+                        <Field
+                            id="auth-password"
+                            label="Password"
                             type="password"
                             value={password}
-                            onChange={(e) => {
-                                setPassword(e.target.value);
-                                setError('');
-                            }}
-                            onKeyPress={handleKeyPress}
+                            onChange={e => { setPassword(e.target.value); setError(''); }}
                             placeholder="Enter your password"
-                            className="w-full h-12 bg-black border border-zinc-800 rounded-2xl px-5 text-white placeholder-zinc-600 focus:outline-none focus:border-white/20 focus:ring-1 focus:ring-white/20 transition-all text-sm"
+                            autoComplete={isLogin ? 'current-password' : 'new-password'}
                         />
+
+                        {error && (
+                            <div
+                                className="animate-fade-in"
+                                style={{
+                                    background: 'rgba(239,68,68,0.08)',
+                                    border: '1px solid rgba(239,68,68,0.25)',
+                                    borderRadius: 'var(--radius-sm)',
+                                    padding: '10px 14px',
+                                    fontSize: '13px',
+                                    color: '#f87171',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 8,
+                                }}
+                            >
+                                <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                                    <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+                                </svg>
+                                {error}
+                            </div>
+                        )}
+
+                        <Button
+                            id="auth-submit-btn"
+                            type="submit"
+                            size="lg"
+                            disabled={isLoading}
+                            style={{ width: '100%', marginTop: 4, opacity: isLoading ? 0.7 : 1 }}
+                        >
+                            {isLoading ? (
+                                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} style={{ animation: 'spin 1s linear infinite' }}>
+                                        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                                    </svg>
+                                    {isLogin ? 'Signing in…' : 'Creating account…'}
+                                </span>
+                            ) : isLogin ? 'Sign In' : 'Create Account'}
+                        </Button>
+                    </form>
+
+                    {/* Toggle */}
+                    <div style={{ marginTop: 28, textAlign: 'center' }}>
+                        <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+                            {isLogin ? "Don't have an account?" : 'Already have an account?'}
+                            {' '}
+                            <button
+                                id="auth-toggle-btn"
+                                type="button"
+                                onClick={() => { setIsLogin(!isLogin); setError(''); }}
+                                style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    color: 'var(--accent-light)',
+                                    fontWeight: 600,
+                                    fontSize: '13px',
+                                    fontFamily: 'inherit',
+                                    padding: '0 2px',
+                                }}
+                            >
+                                {isLogin ? 'Sign Up' : 'Sign In'}
+                            </button>
+                        </p>
                     </div>
-
-                    {error && (
-                        <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">
-                            <p className="text-red-400 text-xs font-medium text-center">{error}</p>
-                        </div>
-                    )}
-
-                    <button
-                        type="submit"
-                        className="h-12 bg-white text-black rounded-2xl font-semibold text-sm hover:bg-zinc-200 active:scale-95 transition-all mt-2 shadow-lg shadow-white/5"
-                    >
-                        {isLogin ? 'Sign In' : 'Sign Up'}
-                    </button>
-                </form>
-
-                {/* Toggle Auth Mode */}
-                <div className="text-center">
-                    <button
-                        onClick={() => {
-                            setIsLogin(!isLogin);
-                            setError('');
-                        }}
-                        className="text-zinc-500 text-xs hover:text-zinc-300 transition-colors"
-                    >
-                        {isLogin ? "Don't have an account? " : 'Already have an account? '}
-                        <span className="text-white font-medium underline underline-offset-4 decoration-zinc-700">
-                            {isLogin ? 'Sign Up' : 'Sign In'}
-                        </span>
-                    </button>
                 </div>
             </div>
-        </div>
+
+            <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+        </main>
     );
 }
 

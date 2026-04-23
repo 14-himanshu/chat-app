@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import './App.css'
+import './App.css';
 import Auth from './Auth';
 import JoinRoom from './components/JoinRoom';
 import ChatRoom from './components/ChatRoom';
 import type { Message } from './types';
+
+// ── Restore session from localStorage ─────────────────────────
+const storedToken = localStorage.getItem('chat_token');
+const storedUsername = localStorage.getItem('chat_username');
 
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -13,8 +17,14 @@ function App() {
   const [currentRoomId, setCurrentRoomId] = useState('');
   const [userCount, setUserCount] = useState(0);
   const [hasJoinedRoom, setHasJoinedRoom] = useState(false);
-  const [username, setUsername] = useState<string | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  // Initialise from persisted session if available
+  const [username, setUsername] = useState<string | null>(storedUsername);
+  const [token, setToken] = useState<string | null>(storedToken);
+  const [isAuthenticated, setIsAuthenticated] = useState(
+    Boolean(storedToken && storedUsername)
+  );
+
   const inputRef = useRef<HTMLInputElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -27,115 +37,153 @@ function App() {
     scrollToBottom();
   }, [messages]);
 
+  // ── WebSocket connection ─────────────────────────────────────
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated || !token) return;
 
-    const wsUrl = import.meta.env.VITE_WS_URL || "ws://localhost:8080";
+    const wsBase = import.meta.env['VITE_WS_URL'] ?? 'ws://localhost:8080';
+    // Attach JWT as a query param — verified server-side before connection is accepted
+    const wsUrl = `${wsBase}?token=${encodeURIComponent(token)}`;
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
-      console.log("Connected to WebSocket server");
+      console.log('Connected to WebSocket server');
       setIsConnected(true);
     };
 
     ws.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data);
+        const data = JSON.parse(event.data as string) as {
+          type: string;
+          payload: Record<string, unknown>;
+        };
 
-        if (data.type === "chat") {
+        if (data.type === 'history') {
+          // Server sends previous room messages on join
+          const history = data.payload['messages'] as Array<{
+            id: string;
+            message: string;
+            username: string;
+            timestamp: string;
+          }>;
+          const historyMessages: Message[] = history.map((m) => ({
+            id: m.id,
+            text: m.message,
+            timestamp: new Date(m.timestamp),
+            username: m.username,
+          }));
+          setMessages(historyMessages);
+        } else if (data.type === 'chat') {
+          const p = data.payload as { message: string; username: string; timestamp: string };
           const newMessage: Message = {
             id: Date.now().toString() + Math.random(),
-            text: data.payload.message,
-            timestamp: new Date(data.payload.timestamp || new Date()),
-            username: data.payload.username,
+            text: p.message,
+            timestamp: new Date(p.timestamp || new Date()),
+            username: p.username,
           };
-          setMessages(m => [...m, newMessage]);
-        } else if (data.type === "userCount") {
-          setUserCount(data.payload.count);
+          setMessages((m) => [...m, newMessage]);
+        } else if (data.type === 'userCount') {
+          setUserCount((data.payload as { count: number }).count);
         }
-      } catch (error) {
-        // Handle plain text messages (backward compatibility)
-        const newMessage: Message = {
-          id: Date.now().toString() + Math.random(),
-          text: event.data,
-          timestamp: new Date(),
-          username: "Unknown",
-        };
-        setMessages(m => [...m, newMessage]);
+      } catch {
+        console.warn('Received non-JSON WS message');
       }
     };
 
-    ws.onerror = (error) => {
-      console.error("WebSocket error:", error);
-      setIsConnected(false);
-    };
+    ws.onerror = () => setIsConnected(false);
 
-    ws.onclose = () => {
-      console.log("Disconnected from WebSocket server");
+    ws.onclose = (ev) => {
+      console.log('Disconnected from WebSocket server');
       setIsConnected(false);
+      // Token rejected by server — clear session and force re-login
+      if (ev.code === 1008) {
+        localStorage.removeItem('chat_token');
+        localStorage.removeItem('chat_username');
+        setIsAuthenticated(false);
+        setToken(null);
+        setUsername(null);
+      }
     };
 
     wsRef.current = ws;
 
     return () => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.close();
-      }
+      if (ws.readyState === WebSocket.OPEN) ws.close();
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, token]);
 
-  const handleAuth = (authenticatedUsername: string) => {
+  // ── Auth handler ─────────────────────────────────────────────
+  const handleAuth = (authenticatedUsername: string, authToken: string) => {
     setUsername(authenticatedUsername);
+    setToken(authToken);
     setIsAuthenticated(true);
   };
 
+  // ── Room join ─────────────────────────────────────────────────
   const joinRoom = () => {
     if (!roomId.trim() || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !username) return;
 
     wsRef.current.send(JSON.stringify({
-      type: "join",
-      payload: {
-        roomId: roomId.trim(),
-        username: username
-      }
+      type: 'join',
+      payload: { roomId: roomId.trim(), username },
     }));
 
     setCurrentRoomId(roomId.trim());
     setHasJoinedRoom(true);
-    setMessages([]);
+    setMessages([]); // cleared; server will push history via 'history' event
   };
 
+  // ── Send message ──────────────────────────────────────────────
   const sendMessage = () => {
     if (!inputValue.trim() || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-
-    const message = inputValue.trim();
-
     wsRef.current.send(JSON.stringify({
-      type: "chat",
-      payload: { message }
+      type: 'chat',
+      payload: { message: inputValue.trim() },
     }));
-
-    setInputValue("");
+    setInputValue('');
   };
 
+  // ── Render ────────────────────────────────────────────────────
   if (!isAuthenticated) {
     return <Auth onAuth={handleAuth} />;
   }
 
   return (
-    <div className="min-h-screen bg-black flex items-center justify-center p-6 md:p-10">
-      {/* Main Container */}
-      <div className="w-full max-w-5xl bg-[#09090b] rounded-xl border border-zinc-800 p-8 md:p-12 flex flex-col gap-6 h-[85vh] md:h-[90vh] shadow-2xl shadow-zinc-900/20 overflow-hidden relative">
-
+    <div
+      style={{
+        width: '100vw',
+        height: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'var(--bg-base)',
+        padding: '16px',
+      }}
+    >
+      <div
+        style={{
+          width: '100%',
+          maxWidth: 960,
+          height: '100%',
+          maxHeight: 820,
+          minHeight: 560,
+          background: 'var(--bg-surface)',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-xl)',
+          overflow: 'hidden',
+          boxShadow: '0 32px 120px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04)',
+          display: 'flex',
+          flexDirection: 'column',
+          position: 'relative',
+        }}
+      >
         {!hasJoinedRoom ? (
-          <div className="flex-1 flex items-center justify-center w-full">
-            <JoinRoom
-              roomId={roomId}
-              setRoomId={setRoomId}
-              joinRoom={joinRoom}
-              isConnected={isConnected}
-            />
-          </div>
+          <JoinRoom
+            roomId={roomId}
+            setRoomId={setRoomId}
+            joinRoom={joinRoom}
+            isConnected={isConnected}
+          />
         ) : (
           <ChatRoom
             currentRoomId={currentRoomId}
