@@ -28,7 +28,7 @@ async function main(): Promise<void> {
     credentials: true,
   }));
 
-  app.options("*", cors()); // Explicitly handle preflight
+  app.options(/(.*)/,  cors(corsOptions)); // Explicitly handle preflight (Express 5 requires regex, not "*")
   app.use(express.json());
 
   // Health check
