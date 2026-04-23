@@ -17,8 +17,8 @@ async function main(): Promise<void> {
   // ── Express app ─────────────────────────────────────────────
   const app = express();
 
-  app.use(cors({
-    origin: (origin, callback) => {
+  const corsOptions = {
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
@@ -26,9 +26,10 @@ async function main(): Promise<void> {
       }
     },
     credentials: true,
-  }));
+  };
 
-  app.options(/(.*)/,  cors(corsOptions)); // Explicitly handle preflight (Express 5 requires regex, not "*")
+  app.use(cors(corsOptions));
+  app.options(/(.*)/, cors(corsOptions)); // Explicitly handle preflight (Express 5 requires regex, not "*")
   app.use(express.json());
 
   // Health check
