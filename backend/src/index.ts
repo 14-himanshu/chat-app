@@ -8,6 +8,7 @@ import { setupWebSocketServer } from "./ws/handler.js";
 
 const PORT = process.env["PORT"] ? parseInt(process.env["PORT"]) : 8080;
 const CLIENT_ORIGIN = process.env["CLIENT_ORIGIN"] ?? "http://localhost:5173";
+const allowedOrigins = CLIENT_ORIGIN.split(",").map((origin) => origin.trim());
 
 async function main(): Promise<void> {
   // ── Database ────────────────────────────────────────────────
@@ -16,7 +17,18 @@ async function main(): Promise<void> {
   // ── Express app ─────────────────────────────────────────────
   const app = express();
 
-  app.use(cors({ origin: CLIENT_ORIGIN, credentials: true }));
+  app.use(cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    credentials: true,
+  }));
+
+  app.options("*", cors()); // Explicitly handle preflight
   app.use(express.json());
 
   // Health check
@@ -35,6 +47,7 @@ async function main(): Promise<void> {
 
   httpServer.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
+    console.log(`   Allowed Origins: ${allowedOrigins.join(", ")}`);
     console.log(`   REST  → http://localhost:${PORT}/api/auth`);
     console.log(`   WS    → ws://localhost:${PORT}?token=<jwt>`);
   });
