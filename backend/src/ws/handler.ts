@@ -110,30 +110,34 @@ export function setupWebSocketServer(httpServer: Server): void {
 
       // ── CHAT ───────────────────────────────────────────────
       if (parsed.type === "chat") {
-        const roomId = parsed.payload["roomId"]?.trim().toUpperCase();
-        const message = parsed.payload["message"]?.trim();
+        const roomId      = parsed.payload["roomId"]?.trim().toUpperCase();
+        const message     = parsed.payload["message"]?.trim() ?? "";
+        const messageType = (parsed.payload["messageType"] as "text" | "image" | "file") ?? "text";
+        const fileUrl     = parsed.payload["fileUrl"];
+        const fileName    = parsed.payload["fileName"];
 
         if (!roomId || !user.rooms.has(roomId)) {
           send(socket, { type: "error", payload: { message: "Join the room first." } });
           return;
         }
-        if (!message) return;
+        // Must have text OR a file
+        if (!message && !fileUrl) return;
 
         const timestamp = new Date().toISOString();
 
         try {
-          await saveMessage(roomId, userId, username, message);
+          await saveMessage(roomId, userId, username, message || fileName || "file", messageType, fileUrl, fileName);
         } catch (err) {
           console.error("Failed to save message:", err);
         }
 
-        // Broadcast to everyone in the room (including sender)
         broadcastToRoom(roomId, {
-          type: "chat",
-          payload: { roomId, message, username, timestamp },
+          type:    "chat",
+          payload: { roomId, message, username, timestamp, messageType, fileUrl, fileName },
         });
         return;
       }
+
 
       send(socket, { type: "error", payload: { message: "Unknown message type." } });
     });

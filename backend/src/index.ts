@@ -4,6 +4,7 @@ import express from "express";
 import cors from "cors";
 import { connectDB } from "./config/db.js";
 import authRoutes from "./routes/auth.routes.js";
+import uploadRoutes from "./routes/upload.routes.js";
 import { setupWebSocketServer } from "./ws/handler.js";
 
 const PORT = process.env["PORT"] ? parseInt(process.env["PORT"]) : 8080;
@@ -39,6 +40,7 @@ async function main(): Promise<void> {
 
   // REST routes
   app.use("/api/auth", authRoutes);
+  app.use("/api/upload", uploadRoutes);
 
   // ── HTTP server (shared by Express + WS) ────────────────────
   const httpServer = http.createServer(app);
@@ -50,6 +52,7 @@ async function main(): Promise<void> {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
     console.log(`   Allowed Origins: ${allowedOrigins.join(", ")}`);
     console.log(`   REST  → http://localhost:${PORT}/api/auth`);
+    console.log(`   REST  → http://localhost:${PORT}/api/upload`);
     console.log(`   WS    → ws://localhost:${PORT}?token=<jwt>`);
   });
 }

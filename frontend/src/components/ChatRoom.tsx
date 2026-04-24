@@ -14,6 +14,7 @@ interface ChatRoomProps {
     inputValue: string;
     setInputValue: (v: string) => void;
     sendMessage: () => void;
+    sendFileMessage: (file: File) => Promise<void>;
     isConnected: boolean;
     messagesEndRef: React.RefObject<HTMLDivElement | null>;
     inputRef: React.RefObject<HTMLInputElement | null>;
@@ -239,8 +240,25 @@ function MessageList({ messages, currentUser, messagesEndRef }: {
                                 {!mine && !sameAsPrev && (
                                     <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 5, marginLeft: 2, letterSpacing: '0.02em' }}>{msg.username}</span>
                                 )}
-                                <div style={{ ...br, padding: '9px 14px', fontSize: 14, lineHeight: 1.6, wordBreak: 'break-word', whiteSpace: 'pre-wrap', background: mine ? 'linear-gradient(135deg,#7c3aed 0%,#6d28d9 100%)' : 'var(--bg-elevated)', color: mine ? '#fff' : 'var(--text-primary)', border: mine ? 'none' : '1px solid var(--border)', boxShadow: mine ? '0 4px 16px rgba(124,58,237,0.3)' : '0 2px 8px rgba(0,0,0,0.25)' }}>
-                                    {msg.text}
+                                <div style={{ ...br, padding: msg.type === 'image' ? '4px' : '9px 14px', fontSize: 14, lineHeight: 1.6, wordBreak: 'break-word', whiteSpace: 'pre-wrap', background: mine ? 'linear-gradient(135deg,#7c3aed 0%,#6d28d9 100%)' : 'var(--bg-elevated)', color: mine ? '#fff' : 'var(--text-primary)', border: mine ? 'none' : '1px solid var(--border)', boxShadow: mine ? '0 4px 16px rgba(124,58,237,0.3)' : '0 2px 8px rgba(0,0,0,0.25)', overflow: 'hidden' }}>
+                                    {/* Image message */}
+                                    {msg.type === 'image' && msg.fileUrl && (
+                                        <a href={msg.fileUrl} target="_blank" rel="noopener noreferrer">
+                                            <img src={msg.fileUrl} alt={msg.fileName ?? 'image'} style={{ display: 'block', maxWidth: 260, maxHeight: 200, borderRadius: 8, objectFit: 'cover' }} />
+                                        </a>
+                                    )}
+                                    {/* File message */}
+                                    {msg.type === 'file' && msg.fileUrl && (
+                                        <a href={msg.fileUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none', color: 'inherit' }}>
+                                            <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                                            <span style={{ fontSize: 13, fontWeight: 500, textDecoration: 'underline', textUnderlineOffset: 2 }}>{msg.fileName ?? 'Download file'}</span>
+                                        </a>
+                                    )}
+                                    {/* Text caption (shown with files too if present) */}
+                                    {msg.text && msg.type !== 'image' && <span>{msg.text}</span>}
+                                    {msg.text && msg.type === 'image' && (
+                                        <p style={{ margin: '6px 4px 2px', fontSize: 13 }}>{msg.text}</p>
+                                    )}
                                 </div>
                                 {!sameAsNext && (
                                     <time style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 5, marginLeft: mine ? 0 : 4, marginRight: mine ? 4 : 0 }}>{formatTime(msg.timestamp)}</time>
@@ -256,25 +274,89 @@ function MessageList({ messages, currentUser, messagesEndRef }: {
 }
 
 /* ── Composer ─────────────────────────────────────────────── */
-function Composer({ value, setValue, sendMessage, isConnected, inputRef, disabled }: {
+function Composer({ value, setValue, sendMessage, sendFileMessage, isConnected, inputRef, disabled }: {
     value: string; setValue: (v: string) => void; sendMessage: () => void;
+    sendFileMessage: (f: File) => Promise<void>;
     isConnected: boolean; inputRef: React.RefObject<HTMLInputElement | null>; disabled: boolean;
 }) {
-    const [focused, setFocused] = useState(false);
-    const canSend = isConnected && !disabled && !!value.trim();
+    const [focused,    setFocused]    = useState(false);
+    const [uploading,  setUploading]  = useState(false);
+    const [preview,    setPreview]    = useState<{ url: string; name: string; isImage: boolean } | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const canSend = isConnected && !disabled && !uploading && (!!value.trim() || !!preview);
+
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const isImage = file.type.startsWith('image/');
+        const objectUrl = isImage ? URL.createObjectURL(file) : '';
+        setPreview({ url: objectUrl, name: file.name, isImage });
+    };
+
+    const handleSend = async () => {
+        if (!canSend) return;
+        if (preview && fileInputRef.current?.files?.[0]) {
+            setUploading(true);
+            try {
+                await sendFileMessage(fileInputRef.current.files[0]);
+            } finally {
+                setUploading(false);
+                setPreview(null);
+                if (fileInputRef.current) fileInputRef.current.value = '';
+            }
+        } else {
+            sendMessage();
+        }
+    };
+
+    const clearPreview = () => {
+        setPreview(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+
     return (
         <footer style={{ padding: '12px 16px', background: 'var(--bg-surface)', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'var(--bg-input)', border: `1px solid ${focused ? 'var(--border-focus)' : 'var(--border)'}`, borderRadius: 'var(--radius-lg)', padding: '6px 6px 6px 16px', boxShadow: focused ? '0 0 0 3px rgba(124,58,237,0.12)' : 'none', transition: 'border-color 0.18s,box-shadow 0.18s' }}>
+            {/* File preview */}
+            {preview && (
+                <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 10, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px' }}>
+                    {preview.isImage && (
+                        <img src={preview.url} alt="preview" style={{ height: 48, width: 48, objectFit: 'cover', borderRadius: 6 }} />
+                    )}
+                    {!preview.isImage && (
+                        <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="var(--accent-light)" strokeWidth={1.5} strokeLinecap="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    )}
+                    <span style={{ fontSize: 12, color: 'var(--text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{preview.name}</span>
+                    {uploading && <span style={{ fontSize: 11, color: 'var(--accent-light)' }}>Uploading…</span>}
+                    {!uploading && <button onClick={clearPreview} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>✕</button>}
+                </div>
+            )}
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'var(--bg-input)', border: `1px solid ${focused ? 'var(--border-focus)' : 'var(--border)'}`, borderRadius: 'var(--radius-lg)', padding: '6px 6px 6px 12px', boxShadow: focused ? '0 0 0 3px rgba(124,58,237,0.12)' : 'none', transition: 'border-color 0.18s,box-shadow 0.18s' }}>
+                {/* File attach button */}
+                <button
+                    id="attach-file-btn"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={!isConnected || disabled || uploading}
+                    title="Attach file or image"
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '4px 6px', display: 'flex', alignItems: 'center', flexShrink: 0, opacity: (!isConnected || disabled || uploading) ? 0.4 : 1 }}
+                >
+                    <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
+                    </svg>
+                </button>
+                <input ref={fileInputRef} type="file" accept="image/*,.pdf,.txt,.doc,.docx" style={{ display: 'none' }} onChange={handleFileChange} />
+
                 <input
                     ref={inputRef} id="message-input" type="text" value={value}
                     onChange={e => setValue(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
                     onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-                    disabled={!isConnected || disabled}
-                    placeholder={disabled ? 'Select a room to chat…' : isConnected ? 'Type a message…' : 'Reconnecting…'}
+                    disabled={!isConnected || disabled || uploading}
+                    placeholder={disabled ? 'Select a room…' : uploading ? 'Uploading…' : isConnected ? 'Type a message…' : 'Reconnecting…'}
                     style={{ flex: 1, height: 40, background: 'transparent', border: 'none', outline: 'none', fontSize: 14, color: 'var(--text-primary)', fontFamily: 'inherit', caretColor: 'var(--accent-light)' }}
                 />
-                <button id="send-message-btn" onClick={sendMessage} disabled={!canSend} aria-label="Send"
+                <button id="send-message-btn" onClick={handleSend} disabled={!canSend} aria-label="Send"
                     style={{ width: 40, height: 40, borderRadius: 'var(--radius-md)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', background: canSend ? 'linear-gradient(135deg,#7c3aed,#6d28d9)' : 'var(--bg-elevated)', color: canSend ? '#fff' : 'var(--text-muted)', cursor: canSend ? 'pointer' : 'not-allowed', flexShrink: 0, boxShadow: canSend ? '0 2px 12px rgba(124,58,237,0.4)' : 'none', transition: 'all 0.18s' }}>
                     <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.3} strokeLinecap="round" strokeLinejoin="round">
                         <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
@@ -292,7 +374,7 @@ function Composer({ value, setValue, sendMessage, isConnected, inputRef, disable
 const ChatRoom: React.FC<ChatRoomProps> = ({
     joinedRooms, activeRoom, messagesByRoom, unreadByRoom, userCountByRoom,
     onJoinRoom, onLeaveRoom, onSwitchRoom,
-    inputValue, setInputValue, sendMessage, isConnected, messagesEndRef, inputRef, currentUser,
+    inputValue, setInputValue, sendMessage, sendFileMessage, isConnected, messagesEndRef, inputRef, currentUser,
 }) => {
     const messages    = activeRoom ? (messagesByRoom[activeRoom] ?? []) : [];
     const userCount   = activeRoom ? (userCountByRoom[activeRoom] ?? 0) : 0;
@@ -343,7 +425,7 @@ const ChatRoom: React.FC<ChatRoomProps> = ({
 
                 {/* Composer */}
                 <div style={{ maxWidth: 780 + 32, width: '100%', margin: '0 auto', alignSelf: 'stretch' }}>
-                    <Composer value={inputValue} setValue={setInputValue} sendMessage={sendMessage} isConnected={isConnected} inputRef={inputRef} disabled={!activeRoom} />
+                    <Composer value={inputValue} setValue={setInputValue} sendMessage={sendMessage} sendFileMessage={sendFileMessage} isConnected={isConnected} inputRef={inputRef} disabled={!activeRoom} />
                 </div>
             </div>
         </div>

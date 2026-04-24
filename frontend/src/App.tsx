@@ -65,22 +65,29 @@ function App() {
           const roomId   = data.payload['roomId'] as string;
           const rawMsgs  = data.payload['messages'] as Array<{
             id: string; message: string; username: string; timestamp: string;
+            type?: string; fileUrl?: string; fileName?: string;
           }>;
           const messages: Message[] = rawMsgs.map(m => ({
             id:        m.id,
             text:      m.message,
             username:  m.username,
             timestamp: new Date(m.timestamp),
+            type:      (m.type as Message['type']) ?? 'text',
+            fileUrl:   m.fileUrl,
+            fileName:  m.fileName,
           }));
           setMessagesByRoom(prev => ({ ...prev, [roomId]: messages }));
 
         } else if (data.type === 'chat') {
-          const p      = data.payload as { roomId: string; message: string; username: string; timestamp: string };
+          const p      = data.payload as { roomId: string; message: string; username: string; timestamp: string; messageType?: string; fileUrl?: string; fileName?: string };
           const newMsg: Message = {
             id:        Date.now().toString() + Math.random(),
             text:      p.message,
             username:  p.username,
             timestamp: new Date(p.timestamp),
+            type:      (p.messageType as Message['type']) ?? 'text',
+            fileUrl:   p.fileUrl,
+            fileName:  p.fileName,
           };
           setMessagesByRoom(prev => ({
             ...prev,
@@ -160,17 +167,40 @@ function App() {
     setUnreadByRoom(prev => ({ ...prev, [roomId]: 0 }));
   }, []);
 
-  // ── Send message ──────────────────────────────────────────────
+  // ── Send text message ─────────────────────────────────────────
   const sendMessage = useCallback(() => {
     if (!inputValue.trim() || !activeRoom ||
         !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
     wsRef.current.send(JSON.stringify({
       type:    'chat',
-      payload: { roomId: activeRoom, message: inputValue.trim() },
+      payload: { roomId: activeRoom, message: inputValue.trim(), messageType: 'text' },
     }));
     setInputValue('');
   }, [inputValue, activeRoom]);
+
+  // ── Upload file then send via WS ──────────────────────────────
+  const sendFileMessage = useCallback(async (file: File) => {
+    if (!activeRoom || !token || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+
+    const apiBase  = import.meta.env['VITE_API_URL'] ?? 'http://localhost:8080';
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const res = await fetch(`${apiBase}/api/upload`, {
+      method:  'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body:    formData,
+    });
+    if (!res.ok) throw new Error(await res.text());
+
+    const { url, fileName, fileType } = await res.json() as { url: string; fileName: string; fileType: 'image' | 'file' };
+
+    wsRef.current.send(JSON.stringify({
+      type:    'chat',
+      payload: { roomId: activeRoom, message: '', messageType: fileType, fileUrl: url, fileName },
+    }));
+  }, [activeRoom, token]);
 
   // ── Render ────────────────────────────────────────────────────
   if (!isAuthenticated) return <Auth onAuth={handleAuth} />;
@@ -205,6 +235,7 @@ function App() {
           inputValue={inputValue}
           setInputValue={setInputValue}
           sendMessage={sendMessage}
+          sendFileMessage={sendFileMessage}
           isConnected={isConnected}
           messagesEndRef={messagesEndRef}
           inputRef={inputRef}
