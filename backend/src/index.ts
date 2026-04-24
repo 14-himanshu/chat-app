@@ -18,20 +18,32 @@ async function main(): Promise<void> {
   // ── Express app ─────────────────────────────────────────────
   const app = express();
 
+  // ── CORS ───────────────────────────────────────────────────────
+  // Allowed: explicit CLIENT_ORIGIN list  +  any *.vercel.app  +  localhost
   const corsOptions = {
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      if (!origin || allowedOrigins.includes(origin)) {
+      // Allow requests with no origin (curl, Postman, mobile apps)
+      if (!origin) { callback(null, true); return; }
+
+      const isAllowed =
+        allowedOrigins.includes(origin) ||           // exact match from env var
+        /^https:\/\/[a-z0-9-]+\.vercel\.app$/.test(origin) || // any *.vercel.app preview
+        /^http:\/\/localhost(:\d+)?$/.test(origin);  // local dev
+
+      if (isAllowed) {
         callback(null, true);
       } else {
-        callback(new Error("Not allowed by CORS"));
+        console.warn(`🚫 CORS blocked: ${origin}`);
+        callback(new Error(`CORS: origin not allowed — ${origin}`));
       }
     },
     credentials: true,
   };
 
   app.use(cors(corsOptions));
-  app.options(/(.*)/, cors(corsOptions)); // Explicitly handle preflight (Express 5 requires regex, not "*")
+  app.options(/(.*)/, cors(corsOptions)); // Express 5 requires regex wildcard
   app.use(express.json());
+
 
   // Health check
   app.get("/health", (_req, res) => {
