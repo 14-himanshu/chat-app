@@ -8,7 +8,8 @@ interface ConnectedUser {
   socket: WebSocket;
   userId: string;
   username: string;
-  room: string | null;
+  /** All rooms this socket is currently subscribed to */
+  rooms: Set<string>;
 }
 
 let connectedUsers: ConnectedUser[] = [];
@@ -20,12 +21,13 @@ function send(socket: WebSocket, data: object): void {
 }
 
 function getRoomUserCount(roomId: string): number {
-  return connectedUsers.filter((u) => u.room === roomId).length;
+  return connectedUsers.filter((u) => u.rooms.has(roomId)).length;
 }
 
-function broadcastToRoom(roomId: string, data: object, excludeSocket?: WebSocket): void {
+/** Broadcast to every socket subscribed to roomId */
+function broadcastToRoom(roomId: string, data: object): void {
   for (const user of connectedUsers) {
-    if (user.room === roomId && user.socket !== excludeSocket) {
+    if (user.rooms.has(roomId)) {
       send(user.socket, data);
     }
   }
@@ -33,15 +35,14 @@ function broadcastToRoom(roomId: string, data: object, excludeSocket?: WebSocket
 
 function broadcastUserCount(roomId: string): void {
   const count = getRoomUserCount(roomId);
-  // broadcastToRoom already covers everyone in the room, including the user who just joined/left
-  broadcastToRoom(roomId, { type: "userCount", payload: { count } });
+  broadcastToRoom(roomId, { type: "userCount", payload: { roomId, count } });
 }
 
 export function setupWebSocketServer(httpServer: Server): void {
   const wss = new WebSocketServer({ server: httpServer });
 
   wss.on("connection", (socket: WebSocket, request: IncomingMessage) => {
-    // ── Authenticate ──────────────────────────────────────────
+    // ── Authenticate ───────────────────────────────────────────
     let userId: string;
     let username: string;
 
@@ -57,10 +58,10 @@ export function setupWebSocketServer(httpServer: Server): void {
 
     console.log(`🔌 ${username} connected`);
 
-    const user: ConnectedUser = { socket, userId, username, room: null };
+    const user: ConnectedUser = { socket, userId, username, rooms: new Set() };
     connectedUsers.push(user);
 
-    // ── Message handler ───────────────────────────────────────
+    // ── Message handler ────────────────────────────────────────
     socket.on("message", async (raw) => {
       let parsed: { type: string; payload: Record<string, string> };
 
@@ -71,53 +72,65 @@ export function setupWebSocketServer(httpServer: Server): void {
         return;
       }
 
-      // ── JOIN ────────────────────────────────────────────────
-      if (parsed.type === "join") {
+      // ── JOIN ROOM ──────────────────────────────────────────
+      if (parsed.type === "joinRoom") {
         const roomId = parsed.payload["roomId"]?.trim().toUpperCase();
         if (!roomId) {
           send(socket, { type: "error", payload: { message: "roomId is required." } });
           return;
         }
 
-        user.room = roomId;
-        console.log(`👥 ${username} joined room ${roomId}`);
+        // Always send history (handles re-joins on reconnect)
+        if (!user.rooms.has(roomId)) {
+          user.rooms.add(roomId);
+          console.log(`👥 ${username} joined room ${roomId} (in ${user.rooms.size} room(s))`);
+        }
 
-        // Send chat history
         try {
           const history = await getRoomHistory(roomId);
-          send(socket, { type: "history", payload: { messages: history } });
+          send(socket, { type: "history", payload: { roomId, messages: history } });
         } catch (err) {
           console.error("Failed to fetch history:", err);
         }
 
-        // Notify room of updated user count
         broadcastUserCount(roomId);
         return;
       }
 
-      // ── CHAT ────────────────────────────────────────────────
+      // ── LEAVE ROOM ─────────────────────────────────────────
+      if (parsed.type === "leaveRoom") {
+        const roomId = parsed.payload["roomId"]?.trim().toUpperCase();
+        if (!roomId || !user.rooms.has(roomId)) return;
+
+        user.rooms.delete(roomId);
+        console.log(`👋 ${username} left room ${roomId}`);
+        broadcastUserCount(roomId);
+        return;
+      }
+
+      // ── CHAT ───────────────────────────────────────────────
       if (parsed.type === "chat") {
-        if (!user.room) {
-          send(socket, { type: "error", payload: { message: "Join a room first." } });
+        const roomId = parsed.payload["roomId"]?.trim().toUpperCase();
+        const message = parsed.payload["message"]?.trim();
+
+        if (!roomId || !user.rooms.has(roomId)) {
+          send(socket, { type: "error", payload: { message: "Join the room first." } });
           return;
         }
-
-        const message = parsed.payload["message"]?.trim();
         if (!message) return;
 
         const timestamp = new Date().toISOString();
 
-        // Persist to DB
         try {
-          await saveMessage(user.room, userId, username, message);
+          await saveMessage(roomId, userId, username, message);
         } catch (err) {
           console.error("Failed to save message:", err);
         }
 
-        // Broadcast to everyone in the room — broadcastToRoom includes the sender
-        broadcastToRoom(user.room, {
+        // Broadcast to everyone in the room (including sender)
+        broadcastToRoom(roomId, {
           type: "chat",
-          payload: { message, username, timestamp },
+          payload: { roomId, message, username, timestamp },
         });
         return;
       }
@@ -125,12 +138,12 @@ export function setupWebSocketServer(httpServer: Server): void {
       send(socket, { type: "error", payload: { message: "Unknown message type." } });
     });
 
-    // ── Disconnect ────────────────────────────────────────────
+    // ── Disconnect ─────────────────────────────────────────────
     socket.on("close", () => {
-      const room = user.room;
+      const rooms = [...user.rooms];
       connectedUsers = connectedUsers.filter((u) => u.socket !== socket);
-      console.log(`🔌 ${username} disconnected`);
-      if (room) broadcastUserCount(room);
+      console.log(`🔌 ${username} disconnected (was in: ${rooms.join(", ") || "none"})`);
+      for (const roomId of rooms) broadcastUserCount(roomId);
     });
 
     socket.on("error", (err) => {

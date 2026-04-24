@@ -1,54 +1,57 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import './App.css';
 import Auth from './Auth';
-import JoinRoom from './components/JoinRoom';
 import ChatRoom from './components/ChatRoom';
 import type { Message } from './types';
 
-// ── Restore session from localStorage ─────────────────────────
-const storedToken = localStorage.getItem('chat_token');
+// ── Restore session ────────────────────────────────────────────
+const storedToken    = localStorage.getItem('chat_token');
 const storedUsername = localStorage.getItem('chat_username');
+const storedRooms    = JSON.parse(localStorage.getItem('chat_rooms') ?? '[]') as string[];
 
 function App() {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isConnected, setIsConnected] = useState(false);
-  const [inputValue, setInputValue] = useState('');
-  const [roomId, setRoomId] = useState('');
-  const [currentRoomId, setCurrentRoomId] = useState('');
-  const [userCount, setUserCount] = useState(0);
-  const [hasJoinedRoom, setHasJoinedRoom] = useState(false);
+  // ── Auth state ───────────────────────────────────────────────
+  const [username,        setUsername]        = useState<string | null>(storedUsername);
+  const [token,           setToken]           = useState<string | null>(storedToken);
+  const [isAuthenticated, setIsAuthenticated] = useState(Boolean(storedToken && storedUsername));
+  const [isConnected,     setIsConnected]     = useState(false);
 
-  // Initialise from persisted session if available
-  const [username, setUsername] = useState<string | null>(storedUsername);
-  const [token, setToken] = useState<string | null>(storedToken);
-  const [isAuthenticated, setIsAuthenticated] = useState(
-    Boolean(storedToken && storedUsername)
-  );
+  // ── Multi-room state ─────────────────────────────────────────
+  const [joinedRooms,    setJoinedRooms]    = useState<string[]>(storedRooms);
+  const [activeRoom,     setActiveRoom]     = useState<string | null>(storedRooms[0] ?? null);
+  const [messagesByRoom, setMessagesByRoom] = useState<Record<string, Message[]>>({});
+  const [unreadByRoom,   setUnreadByRoom]   = useState<Record<string, number>>({});
+  const [userCountByRoom,setUserCountByRoom]= useState<Record<string, number>>({});
 
-  const inputRef = useRef<HTMLInputElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const wsRef          = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef       = useRef<HTMLInputElement>(null);
+  const [inputValue,   setInputValue]  = useState('');
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
+  // ── Scroll to bottom when active room messages change ────────
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messagesByRoom, activeRoom]);
+
+  // ── Persist joined rooms ─────────────────────────────────────
+  useEffect(() => {
+    localStorage.setItem('chat_rooms', JSON.stringify(joinedRooms));
+  }, [joinedRooms]);
 
   // ── WebSocket connection ─────────────────────────────────────
   useEffect(() => {
     if (!isAuthenticated || !token) return;
 
     const wsBase = import.meta.env['VITE_WS_URL'] ?? 'ws://localhost:8080';
-    // Attach JWT as a query param — verified server-side before connection is accepted
-    const wsUrl = `${wsBase}?token=${encodeURIComponent(token)}`;
-    const ws = new WebSocket(wsUrl);
+    const ws     = new WebSocket(`${wsBase}?token=${encodeURIComponent(token)}`);
 
     ws.onopen = () => {
-      console.log('Connected to WebSocket server');
       setIsConnected(true);
+      // Re-subscribe to all persisted rooms on reconnect
+      const rooms = JSON.parse(localStorage.getItem('chat_rooms') ?? '[]') as string[];
+      for (const roomId of rooms) {
+        ws.send(JSON.stringify({ type: 'joinRoom', payload: { roomId } }));
+      }
     };
 
     ws.onmessage = (event) => {
@@ -59,31 +62,41 @@ function App() {
         };
 
         if (data.type === 'history') {
-          // Server sends previous room messages on join
-          const history = data.payload['messages'] as Array<{
-            id: string;
-            message: string;
-            username: string;
-            timestamp: string;
+          const roomId   = data.payload['roomId'] as string;
+          const rawMsgs  = data.payload['messages'] as Array<{
+            id: string; message: string; username: string; timestamp: string;
           }>;
-          const historyMessages: Message[] = history.map((m) => ({
-            id: m.id,
-            text: m.message,
+          const messages: Message[] = rawMsgs.map(m => ({
+            id:        m.id,
+            text:      m.message,
+            username:  m.username,
             timestamp: new Date(m.timestamp),
-            username: m.username,
           }));
-          setMessages(historyMessages);
+          setMessagesByRoom(prev => ({ ...prev, [roomId]: messages }));
+
         } else if (data.type === 'chat') {
-          const p = data.payload as { message: string; username: string; timestamp: string };
-          const newMessage: Message = {
-            id: Date.now().toString() + Math.random(),
-            text: p.message,
-            timestamp: new Date(p.timestamp || new Date()),
-            username: p.username,
+          const p      = data.payload as { roomId: string; message: string; username: string; timestamp: string };
+          const newMsg: Message = {
+            id:        Date.now().toString() + Math.random(),
+            text:      p.message,
+            username:  p.username,
+            timestamp: new Date(p.timestamp),
           };
-          setMessages((m) => [...m, newMessage]);
+          setMessagesByRoom(prev => ({
+            ...prev,
+            [p.roomId]: [...(prev[p.roomId] ?? []), newMsg],
+          }));
+          // Increment unread if this room is not active
+          setActiveRoom(current => {
+            if (current !== p.roomId) {
+              setUnreadByRoom(u => ({ ...u, [p.roomId]: (u[p.roomId] ?? 0) + 1 }));
+            }
+            return current;
+          });
+
         } else if (data.type === 'userCount') {
-          setUserCount((data.payload as { count: number }).count);
+          const { roomId, count } = data.payload as { roomId: string; count: number };
+          setUserCountByRoom(prev => ({ ...prev, [roomId]: count }));
         }
       } catch {
         console.warn('Received non-JSON WS message');
@@ -93,9 +106,7 @@ function App() {
     ws.onerror = () => setIsConnected(false);
 
     ws.onclose = (ev) => {
-      console.log('Disconnected from WebSocket server');
       setIsConnected(false);
-      // Token rejected by server — clear session and force re-login
       if (ev.code === 1008) {
         localStorage.removeItem('chat_token');
         localStorage.removeItem('chat_username');
@@ -106,98 +117,99 @@ function App() {
     };
 
     wsRef.current = ws;
-
-    return () => {
-      if (ws.readyState === WebSocket.OPEN) ws.close();
-    };
+    return () => { if (ws.readyState === WebSocket.OPEN) ws.close(); };
   }, [isAuthenticated, token]);
 
-  // ── Auth handler ─────────────────────────────────────────────
-  const handleAuth = (authenticatedUsername: string, authToken: string) => {
-    setUsername(authenticatedUsername);
-    setToken(authToken);
-    setIsAuthenticated(true);
+  // ── Auth ─────────────────────────────────────────────────────
+  const handleAuth = (u: string, t: string) => {
+    setUsername(u); setToken(t); setIsAuthenticated(true);
   };
 
-  // ── Room join ─────────────────────────────────────────────────
-  const joinRoom = () => {
-    if (!roomId.trim() || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !username) return;
+  // ── Join a room ───────────────────────────────────────────────
+  const joinRoom = useCallback((roomId: string) => {
+    const id = roomId.trim().toUpperCase();
+    if (!id || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
-    wsRef.current.send(JSON.stringify({
-      type: 'join',
-      payload: { roomId: roomId.trim(), username },
-    }));
+    wsRef.current.send(JSON.stringify({ type: 'joinRoom', payload: { roomId: id } }));
 
-    setCurrentRoomId(roomId.trim());
-    setHasJoinedRoom(true);
-    setMessages([]); // cleared; server will push history via 'history' event
-  };
+    setJoinedRooms(prev => prev.includes(id) ? prev : [...prev, id]);
+    setActiveRoom(id);
+    setUnreadByRoom(prev => ({ ...prev, [id]: 0 }));
+  }, []);
+
+  // ── Leave a room ─────────────────────────────────────────────
+  const leaveRoom = useCallback((roomId: string) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+
+    wsRef.current.send(JSON.stringify({ type: 'leaveRoom', payload: { roomId } }));
+
+    setJoinedRooms(prev => {
+      const next = prev.filter(r => r !== roomId);
+      // Switch to adjacent room if we left the active one
+      setActiveRoom(cur => cur === roomId ? (next[0] ?? null) : cur);
+      return next;
+    });
+    setMessagesByRoom(prev => { const n = { ...prev }; delete n[roomId]; return n; });
+    setUnreadByRoom  (prev => { const n = { ...prev }; delete n[roomId]; return n; });
+    setUserCountByRoom(prev => { const n = { ...prev }; delete n[roomId]; return n; });
+  }, []);
+
+  // ── Switch active room ────────────────────────────────────────
+  const switchRoom = useCallback((roomId: string) => {
+    setActiveRoom(roomId);
+    setUnreadByRoom(prev => ({ ...prev, [roomId]: 0 }));
+  }, []);
 
   // ── Send message ──────────────────────────────────────────────
-  const sendMessage = () => {
-    if (!inputValue.trim() || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+  const sendMessage = useCallback(() => {
+    if (!inputValue.trim() || !activeRoom ||
+        !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+
     wsRef.current.send(JSON.stringify({
-      type: 'chat',
-      payload: { message: inputValue.trim() },
+      type:    'chat',
+      payload: { roomId: activeRoom, message: inputValue.trim() },
     }));
     setInputValue('');
-  };
+  }, [inputValue, activeRoom]);
 
   // ── Render ────────────────────────────────────────────────────
-  if (!isAuthenticated) {
-    return <Auth onAuth={handleAuth} />;
-  }
+  if (!isAuthenticated) return <Auth onAuth={handleAuth} />;
 
   return (
-    <div
-      style={{
-        width: '100vw',
-        height: '100vh',
+    <div style={{
+      width: '100vw', height: '100vh',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'var(--bg-base)', padding: '16px',
+    }}>
+      <div style={{
+        width: '100%', maxWidth: 1100,
+        height: '100%', maxHeight: 820, minHeight: 560,
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-xl)',
+        overflow: 'hidden',
+        boxShadow: '0 32px 120px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04)',
         display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'var(--bg-base)',
-        padding: '16px',
-      }}
-    >
-      <div
-        style={{
-          width: '100%',
-          maxWidth: 960,
-          height: '100%',
-          maxHeight: 820,
-          minHeight: 560,
-          background: 'var(--bg-surface)',
-          border: '1px solid var(--border)',
-          borderRadius: 'var(--radius-xl)',
-          overflow: 'hidden',
-          boxShadow: '0 32px 120px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04)',
-          display: 'flex',
-          flexDirection: 'column',
-          position: 'relative',
-        }}
-      >
-        {!hasJoinedRoom ? (
-          <JoinRoom
-            roomId={roomId}
-            setRoomId={setRoomId}
-            joinRoom={joinRoom}
-            isConnected={isConnected}
-          />
-        ) : (
-          <ChatRoom
-            currentRoomId={currentRoomId}
-            userCount={userCount}
-            messages={messages}
-            inputValue={inputValue}
-            setInputValue={setInputValue}
-            sendMessage={sendMessage}
-            isConnected={isConnected}
-            messagesEndRef={messagesEndRef}
-            inputRef={inputRef}
-            currentUser={username}
-          />
-        )}
+      }}>
+        <ChatRoom
+          // rooms
+          joinedRooms={joinedRooms}
+          activeRoom={activeRoom}
+          messagesByRoom={messagesByRoom}
+          unreadByRoom={unreadByRoom}
+          userCountByRoom={userCountByRoom}
+          onJoinRoom={joinRoom}
+          onLeaveRoom={leaveRoom}
+          onSwitchRoom={switchRoom}
+          // chat
+          inputValue={inputValue}
+          setInputValue={setInputValue}
+          sendMessage={sendMessage}
+          isConnected={isConnected}
+          messagesEndRef={messagesEndRef}
+          inputRef={inputRef}
+          currentUser={username}
+        />
       </div>
     </div>
   );
