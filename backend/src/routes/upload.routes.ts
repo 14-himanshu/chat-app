@@ -56,8 +56,10 @@ router.post(
       );
       res.json(result);
     } catch (err) {
-      console.error("Upload failed:", err);
-      res.status(500).json({ error: "Upload failed. Please try again." });
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Upload failed:", msg);
+      // Include error details so we can diagnose remotely
+      res.status(500).json({ error: "Upload failed.", detail: msg });
     }
   }
 );

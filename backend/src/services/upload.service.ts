@@ -8,6 +8,15 @@ cloudinary.config({
   secure:     true,
 });
 
+// Startup validation — will appear in Railway logs
+const missing = (["CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET"] as const)
+  .filter(k => !process.env[k]);
+if (missing.length > 0) {
+  console.error("❌ Missing Cloudinary env vars:", missing.join(", "));
+} else {
+  console.log("✅ Cloudinary configured — cloud:", process.env["CLOUDINARY_CLOUD_NAME"]);
+}
+
 export interface UploadResult {
   url:      string;
   fileName: string;
