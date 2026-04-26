@@ -10,17 +10,25 @@ function Auth({ onAuth }: AuthProps) {
     const [isLogin, setIsLogin] = useState(true);
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
-    const [error, setError] = useState('');
+    const [fieldErrors, setFieldErrors] = useState<{username?: string, password?: string}>({});
+    const [globalError, setGlobalError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        setError('');
+        setGlobalError('');
+        setFieldErrors({});
 
-        if (!username.trim()) { setError('Username is required'); return; }
-        if (!password.trim()) { setError('Password is required'); return; }
-        if (username.length < 3) { setError('Username must be at least 3 characters'); return; }
-        if (password.length < 4) { setError('Password must be at least 4 characters'); return; }
+        let hasError = false;
+        const newErrors: {username?: string, password?: string} = {};
+
+        if (!username.trim()) { newErrors.username = 'Username is required'; hasError = true; }
+        else if (username.length < 3) { newErrors.username = 'Username must be at least 3 characters'; hasError = true; }
+
+        if (!password.trim()) { newErrors.password = 'Password is required'; hasError = true; }
+        else if (password.length < 4) { newErrors.password = 'Password must be at least 4 characters'; hasError = true; }
+
+        if (hasError) { setFieldErrors(newErrors); return; }
 
         setIsLoading(true);
 
@@ -32,7 +40,7 @@ function Auth({ onAuth }: AuthProps) {
             localStorage.setItem('chat_username', returnedUsername);
             onAuth(returnedUsername, token);
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Something went wrong.');
+            setGlobalError(err instanceof Error ? err.message : 'Something went wrong.');
         } finally {
             setIsLoading(false);
         }
@@ -106,22 +114,24 @@ function Auth({ onAuth }: AuthProps) {
                             label="Username"
                             type="text"
                             value={username}
-                            onChange={e => { setUsername(e.target.value); setError(''); }}
+                            onChange={e => { setUsername(e.target.value); setFieldErrors(prev => ({...prev, username: ''})); setGlobalError(''); }}
                             placeholder="Enter your username"
                             autoFocus
                             autoComplete="username"
+                            error={fieldErrors.username}
                         />
                         <Field
                             id="auth-password"
                             label="Password"
                             type="password"
                             value={password}
-                            onChange={e => { setPassword(e.target.value); setError(''); }}
+                            onChange={e => { setPassword(e.target.value); setFieldErrors(prev => ({...prev, password: ''})); setGlobalError(''); }}
                             placeholder="Enter your password"
                             autoComplete={isLogin ? 'current-password' : 'new-password'}
+                            error={fieldErrors.password}
                         />
 
-                        {error && (
+                        {globalError && (
                             <div
                                 className="animate-fade-in"
                                 style={{
@@ -139,7 +149,7 @@ function Auth({ onAuth }: AuthProps) {
                                 <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                                     <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
                                 </svg>
-                                {error}
+                                {globalError}
                             </div>
                         )}
 
@@ -169,7 +179,7 @@ function Auth({ onAuth }: AuthProps) {
                             <button
                                 id="auth-toggle-btn"
                                 type="button"
-                                onClick={() => { setIsLogin(!isLogin); setError(''); }}
+                                onClick={() => { setIsLogin(!isLogin); setGlobalError(''); setFieldErrors({}); }}
                                 style={{
                                     background: 'none',
                                     border: 'none',

@@ -61,7 +61,7 @@ export function Button({ className, variant = 'primary', size = 'md', style, ...
         primary: {
             background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
             color: '#fff',
-            boxShadow: '0 4px 20px rgba(124,58,237,0.4), inset 0 1px 0 rgba(255,255,255,0.15)',
+            boxShadow: '0 2px 8px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.1)',
         },
         ghost: {
             background: 'transparent',
@@ -123,7 +123,7 @@ export function Field({ label, id, error, className, style, ...props }: FieldPro
                 }}
                 onFocus={e => {
                     e.currentTarget.style.border = `1px solid var(--border-focus)`;
-                    e.currentTarget.style.boxShadow = '0 0 0 3px rgba(124,58,237,0.15)';
+                    e.currentTarget.style.boxShadow = '0 0 0 3px var(--accent-bg)';
                 }}
                 onBlur={e => {
                     e.currentTarget.style.border = `1px solid ${error ? 'rgba(239,68,68,0.5)' : 'var(--border)'}`;
@@ -150,14 +150,12 @@ export function BrandMark({ size = 44 }: { size?: number }) {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                boxShadow: '0 4px 20px rgba(124,58,237,0.45), inset 0 1px 0 rgba(255,255,255,0.2)',
+                boxShadow: '0 2px 10px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.1)',
                 flexShrink: 0,
             }}
         >
-            <svg width={size * 0.48} height={size * 0.48} fill="none" stroke="white" viewBox="0 0 24 24" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                    d="M8 10h.01M12 10h.01M16 10h.01M21 11.5c0 4.142-4.03 7.5-9 7.5a10.2 10.2 0 01-3.9-.76L4 19l1.08-3.25A6.75 6.75 0 013 11.5C3 7.358 7.03 4 12 4s9 3.358 9 7.5z"
-                />
+            <svg width={size * 0.55} height={size * 0.55} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
             </svg>
         </div>
     );
@@ -236,7 +234,7 @@ export function Avatar({ name, size = 32 }: { name: string; size?: number }) {
                 fontWeight: 700,
                 color: '#fff',
                 flexShrink: 0,
-                boxShadow: '0 2px 8px rgba(0,0,0,0.35)',
+                boxShadow: 'var(--shadow-sm)',
                 letterSpacing: '-0.01em',
             }}
         >

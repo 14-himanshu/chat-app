@@ -2,6 +2,12 @@ import mongoose, { type Document, Schema } from "mongoose";
 
 export type MessageType = "text" | "image" | "file";
 
+export interface IReaction {
+  icon: string;
+  userId: mongoose.Types.ObjectId;
+  username: string;
+}
+
 export interface IMessage extends Document {
   roomId: string;
   userId: mongoose.Types.ObjectId;
@@ -11,7 +17,17 @@ export interface IMessage extends Document {
   fileUrl?: string;
   fileName?: string;
   timestamp: Date;
+  edited?: boolean;
+  deleted?: boolean;
+  replyTo?: mongoose.Types.ObjectId | IMessage;
+  reactions?: IReaction[];
 }
+
+const reactionSchema = new Schema<IReaction>({
+  icon: { type: String, required: true },
+  userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+  username: { type: String, required: true }
+}, { _id: false });
 
 const messageSchema = new Schema<IMessage>({
   roomId:   { type: String, required: true, index: true },
@@ -22,6 +38,10 @@ const messageSchema = new Schema<IMessage>({
   fileUrl:  { type: String },
   fileName: { type: String },
   timestamp: { type: Date, default: () => new Date() },
+  edited:   { type: Boolean, default: false },
+  deleted:  { type: Boolean, default: false },
+  replyTo:  { type: Schema.Types.ObjectId, ref: "Message" },
+  reactions: [reactionSchema]
 });
 
 messageSchema.index({ roomId: 1, timestamp: 1 });

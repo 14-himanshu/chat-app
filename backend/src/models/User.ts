@@ -1,9 +1,16 @@
 import mongoose, { type Document, Schema } from "mongoose";
 
+export type UserStatus = "online" | "offline" | "busy" | "away";
+
 export interface IUser extends Document {
   username: string;
   password: string; // bcrypt hash
+  avatar?: string;
+  bio?: string;
+  status: UserStatus;
+  lastSeen: Date;
   createdAt: Date;
+  updatedAt: Date;
 }
 
 const userSchema = new Schema<IUser>(
@@ -19,6 +26,24 @@ const userSchema = new Schema<IUser>(
     password: {
       type: String,
       required: true,
+    },
+    avatar: {
+      type: String,
+      default: undefined,
+    },
+    bio: {
+      type: String,
+      maxlength: 150,
+      default: "",
+    },
+    status: {
+      type: String,
+      enum: ["online", "offline", "busy", "away"],
+      default: "offline",
+    },
+    lastSeen: {
+      type: Date,
+      default: () => new Date(),
     },
   },
   { timestamps: true }

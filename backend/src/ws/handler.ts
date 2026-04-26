@@ -2,7 +2,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
 import type { IncomingMessage } from "http";
 import { authenticateWsRequest } from "../middleware/auth.middleware.js";
-import { saveMessage, getRoomHistory } from "../services/message.service.js";
+import { saveMessage, getRoomHistory, editMessage, deleteMessage, addReaction } from "../services/message.service.js";
 
 interface ConnectedUser {
   socket: WebSocket;
@@ -34,8 +34,11 @@ function broadcastToRoom(roomId: string, data: object): void {
 }
 
 function broadcastUserCount(roomId: string): void {
-  const count = getRoomUserCount(roomId);
-  broadcastToRoom(roomId, { type: "userCount", payload: { roomId, count } });
+  const users = connectedUsers.filter(u => u.rooms.has(roomId)).map(u => u.username);
+  // Remove duplicates just in case one user has multiple connections
+  const uniqueUsers = Array.from(new Set(users));
+  const count = uniqueUsers.length;
+  broadcastToRoom(roomId, { type: "roomUsers", payload: { roomId, count, users: uniqueUsers } });
 }
 
 export function setupWebSocketServer(httpServer: Server): void {
@@ -115,6 +118,7 @@ export function setupWebSocketServer(httpServer: Server): void {
         const messageType = (parsed.payload["messageType"] as "text" | "image" | "file") ?? "text";
         const fileUrl     = parsed.payload["fileUrl"];
         const fileName    = parsed.payload["fileName"];
+        const replyTo     = parsed.payload["replyTo"];
 
         if (!roomId || !user.rooms.has(roomId)) {
           send(socket, { type: "error", payload: { message: "Join the room first." } });
@@ -123,18 +127,85 @@ export function setupWebSocketServer(httpServer: Server): void {
         // Must have text OR a file
         if (!message && !fileUrl) return;
 
-        const timestamp = new Date().toISOString();
-
         try {
-          await saveMessage(roomId, userId, username, message || fileName || "file", messageType, fileUrl, fileName);
+          const savedMessage = await saveMessage(roomId, userId, username, message || fileName || "file", messageType, fileUrl, fileName, replyTo);
+          // Broadcast the fully populated message
+          broadcastToRoom(roomId, {
+            type:    "chat",
+            payload: savedMessage,
+          });
         } catch (err) {
           console.error("Failed to save message:", err);
+          send(socket, { type: "error", payload: { message: "Failed to send message." } });
         }
+        return;
+      }
 
-        broadcastToRoom(roomId, {
-          type:    "chat",
-          payload: { roomId, message, username, timestamp, messageType, fileUrl, fileName },
-        });
+      // ── EDIT MESSAGE ────────────────────────────────────────
+      if (parsed.type === "editMessage") {
+        const roomId  = parsed.payload["roomId"]?.trim().toUpperCase();
+        const msgId   = parsed.payload["messageId"];
+        const newText = parsed.payload["message"]?.trim();
+
+        if (roomId && user.rooms.has(roomId) && msgId && newText) {
+          try {
+            const updated = await editMessage(msgId, userId, newText);
+            if (updated) {
+              broadcastToRoom(roomId, { type: "messageUpdated", payload: updated });
+            }
+          } catch (err) {
+            console.error("Failed to edit message:", err);
+          }
+        }
+        return;
+      }
+
+      // ── DELETE MESSAGE ──────────────────────────────────────
+      if (parsed.type === "deleteMessage") {
+        const roomId = parsed.payload["roomId"]?.trim().toUpperCase();
+        const msgId  = parsed.payload["messageId"];
+
+        if (roomId && user.rooms.has(roomId) && msgId) {
+          try {
+            const updated = await deleteMessage(msgId, userId);
+            if (updated) {
+              broadcastToRoom(roomId, { type: "messageUpdated", payload: updated });
+            }
+          } catch (err) {
+            console.error("Failed to delete message:", err);
+          }
+        }
+        return;
+      }
+
+      // ── REACT MESSAGE ───────────────────────────────────────
+      if (parsed.type === "reactMessage") {
+        const roomId = parsed.payload["roomId"]?.trim().toUpperCase();
+        const msgId  = parsed.payload["messageId"];
+        const icon   = parsed.payload["icon"];
+
+        if (roomId && user.rooms.has(roomId) && msgId && icon) {
+          try {
+            // Need ObjectId conversion
+            const mongoose = (await import("mongoose")).default;
+            const updated = await addReaction(msgId, new mongoose.Types.ObjectId(userId), username, icon);
+            if (updated) {
+              broadcastToRoom(roomId, { type: "messageUpdated", payload: updated });
+            }
+          } catch (err) {
+            console.error("Failed to react to message:", err);
+          }
+        }
+        return;
+      }
+
+      // ── TYPING ─────────────────────────────────────────────
+      if (parsed.type === "typing") {
+        const roomId = parsed.payload["roomId"]?.trim().toUpperCase();
+        const isTyping = parsed.payload["isTyping"] === "true";
+        if (roomId && user.rooms.has(roomId)) {
+          broadcastToRoom(roomId, { type: "typing", payload: { roomId, username, isTyping } });
+        }
         return;
       }
 

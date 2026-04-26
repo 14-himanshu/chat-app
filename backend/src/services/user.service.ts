@@ -1,0 +1,72 @@
+import { User } from "../models/User.js";
+import { comparePassword, hashPassword } from "./auth.service.js";
+import { uploadToCloudinary } from "./upload.service.js";
+
+export async function getUserById(userId: string) {
+  const user = await User.findById(userId).select("-password");
+  if (!user) throw new Error("User not found.");
+  return user;
+}
+
+export async function updateProfile(
+  userId: string,
+  data: { username?: string; bio?: string; status?: string }
+) {
+  const { username, bio, status } = data;
+
+  // Username uniqueness check (only if changing)
+  if (username) {
+    const existing = await User.findOne({ username, _id: { $ne: userId } });
+    if (existing) throw new Error("Username already taken.");
+  }
+
+  const updated = await User.findByIdAndUpdate(
+    userId,
+    {
+      ...(username && { username: username.trim() }),
+      ...(bio !== undefined && { bio: bio.slice(0, 150) }),
+      ...(status && { status }),
+    },
+    { new: true, select: "-password" }
+  );
+
+  if (!updated) throw new Error("User not found.");
+  return updated;
+}
+
+export async function changePassword(
+  userId: string,
+  oldPassword: string,
+  newPassword: string
+) {
+  const user = await User.findById(userId);
+  if (!user) throw new Error("User not found.");
+
+  const valid = await comparePassword(oldPassword, user.password);
+  if (!valid) throw new Error("Current password is incorrect.");
+
+  if (newPassword.length < 4) throw new Error("New password must be at least 4 characters.");
+
+  user.password = await hashPassword(newPassword);
+  await user.save();
+}
+
+export async function updateAvatar(
+  userId: string,
+  buffer: Buffer,
+  originalName: string,
+  mimeType: string
+) {
+  const result = await uploadToCloudinary(buffer, originalName, mimeType);
+  const updated = await User.findByIdAndUpdate(
+    userId,
+    { avatar: result.url },
+    { new: true, select: "-password" }
+  );
+  if (!updated) throw new Error("User not found.");
+  return updated;
+}
+
+export async function updateLastSeen(userId: string, status: "online" | "offline") {
+  await User.findByIdAndUpdate(userId, { lastSeen: new Date(), status });
+}

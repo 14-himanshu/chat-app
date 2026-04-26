@@ -1,0 +1,105 @@
+import type { Response } from "express";
+import type { AuthRequest } from "../middleware/requireAuth.js";
+import {
+  getUserById,
+  updateProfile,
+  changePassword,
+  updateAvatar,
+} from "../services/user.service.js";
+
+/** GET /api/user/me */
+export async function getMe(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const user = await getUserById(req.user.userId);
+    res.json({ user });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to fetch profile.";
+    res.status(404).json({ error: msg });
+  }
+}
+
+/** PUT /api/user/update */
+export async function updateUser(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const { username, bio, status } = req.body as {
+      username?: string;
+      bio?: string;
+      status?: string;
+    };
+
+    const VALID_STATUSES = ["online", "offline", "busy", "away"];
+
+    if (username !== undefined) {
+      if (typeof username !== "string" || username.trim().length < 3) {
+        res.status(400).json({ error: "Username must be at least 3 characters." });
+        return;
+      }
+      if (username.trim().length > 30) {
+        res.status(400).json({ error: "Username must be at most 30 characters." });
+        return;
+      }
+    }
+
+    if (bio !== undefined && bio.length > 150) {
+      res.status(400).json({ error: "Bio must be 150 characters or fewer." });
+      return;
+    }
+
+    if (status !== undefined && !VALID_STATUSES.includes(status)) {
+      res.status(400).json({ error: `Status must be one of: ${VALID_STATUSES.join(", ")}.` });
+      return;
+    }
+
+    const updateData: { username?: string; bio?: string; status?: string } = {};
+    if (username !== undefined) updateData.username = username;
+    if (bio !== undefined) updateData.bio = bio;
+    if (status !== undefined) updateData.status = status;
+
+    const user = await updateProfile(req.user.userId, updateData);
+    res.json({ user });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to update profile.";
+    res.status(409).json({ error: msg });
+  }
+}
+
+/** POST /api/user/avatar */
+export async function uploadAvatar(req: AuthRequest, res: Response): Promise<void> {
+  if (!req.file) {
+    res.status(400).json({ error: "No image file provided." });
+    return;
+  }
+  try {
+    const user = await updateAvatar(
+      req.user.userId,
+      req.file.buffer,
+      req.file.originalname,
+      req.file.mimetype
+    );
+    res.json({ user });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Avatar upload failed.";
+    res.status(500).json({ error: msg });
+  }
+}
+
+/** POST /api/user/change-password */
+export async function changeUserPassword(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const { oldPassword, newPassword } = req.body as {
+      oldPassword?: string;
+      newPassword?: string;
+    };
+
+    if (!oldPassword || !newPassword) {
+      res.status(400).json({ error: "Both oldPassword and newPassword are required." });
+      return;
+    }
+
+    await changePassword(req.user.userId, oldPassword, newPassword);
+    res.json({ message: "Password changed successfully." });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Password change failed.";
+    res.status(400).json({ error: msg });
+  }
+}
