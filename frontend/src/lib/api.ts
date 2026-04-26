@@ -1,7 +1,7 @@
 // Centralised API client — all calls go through here
 // Automatically attaches the JWT token from localStorage
 
-const API_BASE = (import.meta.env['VITE_API_URL'] as string | undefined) ?? 'http://localhost:8080';
+const API_BASE = (import.meta.env.VITE_BACKEND_URL as string | undefined) ?? 'http://localhost:8080';
 
 function getToken(): string | null {
   return localStorage.getItem('chat_token');

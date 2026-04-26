@@ -14,7 +14,8 @@ function App() {
   // ── Auth state ───────────────────────────────────────────────
   const [username,        setUsername]        = useState<string | null>(storedUsername);
   const [token,           setToken]           = useState<string | null>(storedToken);
-  const [isAuthenticated, setIsAuthenticated] = useState(Boolean(storedToken && storedUsername));
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isCheckingAuth,  setIsCheckingAuth]  = useState(true);
   const [isConnected,     setIsConnected]     = useState(false);
   const [showProfile,     setShowProfile]     = useState(false);
   const [msgCount,        setMsgCount]        = useState(0);
@@ -42,12 +43,45 @@ function App() {
     localStorage.setItem('chat_rooms', JSON.stringify(joinedRooms));
   }, [joinedRooms]);
 
+  // ── Auth Check on Mount ──────────────────────────────────────
+  useEffect(() => {
+    const checkAuth = async () => {
+      if (!storedToken || !storedUsername) {
+        setIsCheckingAuth(false);
+        return;
+      }
+      try {
+        const backendUrl = (import.meta.env.VITE_BACKEND_URL as string | undefined) ?? 'http://localhost:8080';
+        const res = await fetch(`${backendUrl}/api/user/me`, {
+          headers: { Authorization: `Bearer ${storedToken}` }
+        });
+        if (res.ok) {
+          setIsAuthenticated(true);
+        } else {
+          handleLogout();
+        }
+      } catch (err) {
+        console.error('Auth check failed:', err);
+      } finally {
+        setIsCheckingAuth(false);
+      }
+    };
+    checkAuth();
+  }, []);
+
   // ── WebSocket connection ─────────────────────────────────────
   useEffect(() => {
     if (!isAuthenticated || !token) return;
 
-    const wsBase = import.meta.env['VITE_WS_URL'] ?? 'ws://localhost:8080';
-    const ws     = new WebSocket(`${wsBase}?token=${encodeURIComponent(token)}`);
+    const rawBackendUrl = (import.meta.env.VITE_BACKEND_URL as string | undefined) ?? 'http://localhost:8080';
+    const wsBase = (import.meta.env.VITE_WS_URL as string | undefined) ?? rawBackendUrl.replace(/^http/, 'ws');
+    
+    // Enforce wss:// in production environments
+    const secureWsBase = wsBase.startsWith('ws://') && !wsBase.includes('localhost') 
+      ? wsBase.replace('ws://', 'wss://') 
+      : wsBase;
+
+    const ws = new WebSocket(`${secureWsBase}?token=${encodeURIComponent(token)}`);
 
     ws.onopen = () => {
       setIsConnected(true);
@@ -278,7 +312,7 @@ function App() {
   const sendFileMessage = useCallback(async (file: File) => {
     if (!activeRoom || !token || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
-    const apiBase  = import.meta.env['VITE_API_URL'] ?? 'http://localhost:8080';
+    const apiBase = (import.meta.env.VITE_BACKEND_URL as string | undefined) ?? 'http://localhost:8080';
     const formData = new FormData();
     formData.append('file', file);
 
@@ -298,6 +332,17 @@ function App() {
   }, [activeRoom, token]);
 
   // ── Render ────────────────────────────────────────────────────
+  if (isCheckingAuth) {
+    return (
+      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-base)', color: 'var(--text-primary)' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+          <div style={{ width: 40, height: 40, border: '3px solid var(--accent-bg)', borderTop: '3px solid var(--accent)', borderRadius: '50%', animation: 'shimmer 1.4s infinite linear' }} />
+          <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-secondary)' }}>Initializing SyncTalk...</span>
+        </div>
+      </div>
+    );
+  }
+
   if (!isAuthenticated) return <Auth onAuth={handleAuth} />;
 
   return (
