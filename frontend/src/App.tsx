@@ -51,8 +51,9 @@ function App() {
         return;
       }
       try {
-        const backendUrl = (import.meta.env.VITE_BACKEND_URL as string | undefined) ?? 'http://localhost:8080';
-        const res = await fetch(`${backendUrl}/api/user/me`, {
+        const backendUrl = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8080';
+        const cleanUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
+        const res = await fetch(`${cleanUrl}/api/user/me`, {
           headers: { Authorization: `Bearer ${storedToken}` }
         });
         if (res.ok) {
@@ -73,15 +74,18 @@ function App() {
   useEffect(() => {
     if (!isAuthenticated || !token) return;
 
-    const rawBackendUrl = (import.meta.env.VITE_BACKEND_URL as string | undefined) ?? 'http://localhost:8080';
-    const wsBase = (import.meta.env.VITE_WS_URL as string | undefined) ?? rawBackendUrl.replace(/^http/, 'ws');
+    const rawBackendUrl = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8080';
+    const cleanBackendUrl = rawBackendUrl.endsWith('/') ? rawBackendUrl.slice(0, -1) : rawBackendUrl;
+    
+    // Derive WS URL if not provided
+    let wsBase = import.meta.env.VITE_WS_URL ?? cleanBackendUrl.replace(/^http/, 'ws');
     
     // Enforce wss:// in production environments
-    const secureWsBase = wsBase.startsWith('ws://') && !wsBase.includes('localhost') 
-      ? wsBase.replace('ws://', 'wss://') 
-      : wsBase;
+    if (wsBase.startsWith('ws://') && !wsBase.includes('localhost')) {
+      wsBase = wsBase.replace('ws://', 'wss://');
+    }
 
-    const ws = new WebSocket(`${secureWsBase}?token=${encodeURIComponent(token)}`);
+    const ws = new WebSocket(`${wsBase}?token=${encodeURIComponent(token)}`);
 
     ws.onopen = () => {
       setIsConnected(true);
@@ -309,10 +313,11 @@ function App() {
   }, [activeRoom]);
 
   // ── Upload file then send via WS ──────────────────────────────
-  const sendFileMessage = useCallback(async (file: File) => {
+  const sendFileMessage = useCallback(async (file: File, caption?: string, replyToId?: string) => {
     if (!activeRoom || !token || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
-    const apiBase = (import.meta.env.VITE_BACKEND_URL as string | undefined) ?? 'http://localhost:8080';
+    const rawBackendUrl = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8080';
+    const apiBase = rawBackendUrl.endsWith('/') ? rawBackendUrl.slice(0, -1) : rawBackendUrl;
     const formData = new FormData();
     formData.append('file', file);
 
@@ -327,7 +332,7 @@ function App() {
 
     wsRef.current.send(JSON.stringify({
       type:    'chat',
-      payload: { roomId: activeRoom, message: '', messageType: fileType, fileUrl: url, fileName },
+      payload: { roomId: activeRoom, message: caption ?? '', messageType: fileType, fileUrl: url, fileName, replyTo: replyToId },
     }));
   }, [activeRoom, token]);
 

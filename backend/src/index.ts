@@ -20,16 +20,17 @@ async function main(): Promise<void> {
   const app = express();
 
   // ── CORS ───────────────────────────────────────────────────────
-  // Allowed: explicit CLIENT_ORIGIN list  +  any *.vercel.app  +  localhost
   const corsOptions = {
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      // Allow requests with no origin (curl, Postman, mobile apps)
-      if (!origin) { callback(null, true); return; }
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
 
       const isAllowed =
-        allowedOrigins.includes(origin) ||           // exact match from env var
-        /^https:\/\/[a-z0-9-]+\.vercel\.app$/.test(origin) || // any *.vercel.app preview
-        /^http:\/\/localhost(:\d+)?$/.test(origin);  // local dev
+        allowedOrigins.includes(origin) ||
+        /^https:\/\/.*\.vercel\.app$/.test(origin) || // More permissive for Vercel
+        /^http:\/\/localhost(:\d+)?$/.test(origin);
 
       if (isAllowed) {
         callback(null, true);
@@ -39,6 +40,8 @@ async function main(): Promise<void> {
       }
     },
     credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   };
 
   app.use(cors(corsOptions));

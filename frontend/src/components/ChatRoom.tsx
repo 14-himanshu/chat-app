@@ -16,7 +16,7 @@ interface ChatRoomProps {
     inputValue: string;
     setInputValue: (v: string) => void;
     sendMessage: (replyToId?: string) => void;
-    sendFileMessage: (f: File) => Promise<void>;
+    sendFileMessage: (f: File, caption?: string, replyToId?: string) => Promise<void>;
     onEditMessage: (msgId: string, text: string) => void;
     onDeleteMessage: (msgId: string) => void;
     onReactMessage: (msgId: string, icon: string) => void;
@@ -507,7 +507,7 @@ function MessageList({ messages, currentUser, messagesEndRef, onReply, onEdit, o
 /* ── Composer ─────────────────────────────────────────────── */
 function Composer({ value, setValue, sendMessage, sendFileMessage, isConnected, inputRef, disabled, onTyping, replyToMsg, setReplyToMsg, editingMsg, setEditingMsg, onEditMessage }: {
     value: string; setValue: (v: string) => void; sendMessage: (replyToId?: string) => void;
-    sendFileMessage: (f: File) => Promise<void>;
+    sendFileMessage: (f: File, caption?: string, replyToId?: string) => Promise<void>;
     isConnected: boolean; inputRef: React.RefObject<HTMLInputElement | null>; disabled: boolean;
     onTyping: (isTyping: boolean) => void;
     replyToMsg: Message | null; setReplyToMsg: (m: Message | null) => void;
@@ -538,7 +538,8 @@ function Composer({ value, setValue, sendMessage, sendFileMessage, isConnected, 
         } else if (preview && fileInputRef.current?.files?.[0]) {
             setUploading(true);
             try {
-                await sendFileMessage(fileInputRef.current.files[0]);
+                await sendFileMessage(fileInputRef.current.files[0], value, replyToMsg?.id);
+                setValue('');
             } finally {
                 setUploading(false);
                 setPreview(null);
