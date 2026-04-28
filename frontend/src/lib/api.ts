@@ -3,7 +3,7 @@
 
 const getApiBase = () => {
   const url = import.meta.env.VITE_BACKEND_URL;
-  if (!url) return 'http://localhost:8080';
+  if (!url) return window.location.hostname === 'localhost' ? 'http://localhost:8080' : '';
   // Ensure the URL doesn't have a trailing slash
   return url.endsWith('/') ? url.slice(0, -1) : url;
 };

@@ -51,7 +51,10 @@ function App() {
         return;
       }
       try {
-        const backendUrl = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8080';
+        const backendUrl = import.meta.env.VITE_BACKEND_URL || (window.location.hostname === 'localhost' ? 'http://localhost:8080' : '');
+        if (!backendUrl) {
+          throw new Error('Backend URL not configured');
+        }
         const cleanUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
         const res = await fetch(`${cleanUrl}/api/user/me`, {
           headers: { Authorization: `Bearer ${storedToken}` }
@@ -74,11 +77,11 @@ function App() {
   useEffect(() => {
     if (!isAuthenticated || !token) return;
 
-    const rawBackendUrl = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8080';
+    const rawBackendUrl = import.meta.env.VITE_BACKEND_URL || (window.location.hostname === 'localhost' ? 'http://localhost:8080' : '');
     const cleanBackendUrl = rawBackendUrl.endsWith('/') ? rawBackendUrl.slice(0, -1) : rawBackendUrl;
     
     // Derive WS URL if not provided
-    let wsBase = import.meta.env.VITE_WS_URL ?? cleanBackendUrl.replace(/^http/, 'ws');
+    let wsBase = import.meta.env.VITE_WS_URL || (window.location.hostname === 'localhost' ? 'ws://localhost:8080' : cleanBackendUrl.replace(/^http/, 'ws'));
     
     // Enforce wss:// in production environments
     if (wsBase.startsWith('ws://') && !wsBase.includes('localhost')) {
@@ -316,7 +319,7 @@ function App() {
   const sendFileMessage = useCallback(async (file: File, caption?: string, replyToId?: string) => {
     if (!activeRoom || !token || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
-    const rawBackendUrl = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8080';
+    const rawBackendUrl = import.meta.env.VITE_BACKEND_URL || (window.location.hostname === 'localhost' ? 'http://localhost:8080' : '');
     const apiBase = rawBackendUrl.endsWith('/') ? rawBackendUrl.slice(0, -1) : rawBackendUrl;
     const formData = new FormData();
     formData.append('file', file);
